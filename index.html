@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>梦幻浮光交互花朵</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            /* 梦幻高级渐变背景 */
+            background: radial-gradient(circle at center, #1b2735 0%, #090a0f 100%);
+            /* 阻止移动端默认的滑动和双击缩放行为 */
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        let flowers = [];
+        
+        // 鼠标/触摸交互数据
+        let mouse = {
+            x: -1000,
+            y: -1000,
+            vx: 0,
+            vy: 0,
+            radius: 120 // 鼠标影响范围（风力范围）
+        };
+        let lastMouse = { x: -1000, y: -1000 };
+
+        // 初始化画布大小
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            initFlowers();
+        }
+        window.addEventListener('resize', resize);
+
+        // 花朵和线的物理节点类
+        class Segment {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+            }
+        }
+
+        // 花朵类
+        class Flower {
+            constructor(baseX) {
+                this.baseX = baseX;
+                this.baseY = height + 20; // 根部在屏幕最底部外侧一点
+                this.numSegments = 12;    // 线的段数
+                this.segmentLength = height * 0.05 + Math.random() * height * 0.02; // 线的高度
+                this.segments = [];
+                
+                // 梦幻参数
+                this.timeOffset = Math.random() * 100;
+                this.swaySpeed = 0.0015 + Math.random() * 0.001;
+                this.swayAmplitude = 30 + Math.random() * 40; // 海草摇摆幅度
+                this.hue = 180 + Math.random() * 60; // 颜色：青色到淡紫色过渡，显得高级
+                this.flowerSize = 8 + Math.random() * 6;
+
+                // 物理参数
+                this.stiffness = 0.03; // 弹性（恢复原始状态的速度）
+                this.friction = 0.85;  // 摩擦力（数值越小停得越快）
+
+                for (let i = 0; i < this.numSegments; i++) {
+                    this.segments.push(new Segment(this.baseX, this.baseY - i * this.segmentLength));
+                }
+            }
+
+            update(time) {
+                for (let i = 1; i < this.numSegments; i++) {
+                    let seg = this.segments[i];
+                    
+                    // 1. 计算海草浮力与正弦波扭动带来的"目标自然位置"
+                    let targetX = this.baseX + Math.sin(time * this.swaySpeed + i * 0.3 + this.timeOffset) * this.swayAmplitude * (i / this.numSegments);
+                    let targetY = this.baseY - i * this.segmentLength;
+
+                    // 2. 鼠标/触摸力的交互 (风力模拟)
+                    let dx = mouse.x - seg.x;
+                    let dy = mouse.y - seg.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < mouse.radius) {
+                        // 距离越近，力越大
+                        let force = (mouse.radius - dist) / mouse.radius;
+                        // 受到鼠标移动速度的影响（拨动感）
+                        seg.vx += mouse.vx * force * 0.05;
+                        // 排斥力
+                        seg.vx -= (dx / dist) * force * 2;
+                        seg.vy -= (dy / dist) * force * 2;
+                    }
+
+                    // 3. 弹性物理系统：趋向自然目标位置
+                    seg.vx += (targetX - seg.x) * this.stiffness;
+                    seg.vy += (targetY - seg.y) * this.stiffness;
+
+                    // 4. 应用摩擦力并更新位置
+                    seg.vx *= this.friction;
+                    seg.vy *= this.friction;
+                    seg.x += seg.vx;
+                    seg.y += seg.vy;
+                }
+            }
+
+            draw() {
+                // 画线 (牵引的线)
+                ctx.beginPath();
+                ctx.moveTo(this.segments[0].x, this.segments[0].y);
+                
+                // 使用二次贝塞尔曲线让线更平滑
+                for (let i = 1; i < this.numSegments - 1; i++) {
+                    let xc = (this.segments[i].x + this.segments[i+1].x) / 2;
+                    let yc = (this.segments[i].y + this.segments[i+1].y) / 2;
+                    ctx.quadraticCurveTo(this.segments[i].x, this.segments[i].y, xc, yc);
+                }
+                let lastSeg = this.segments[this.numSegments - 1];
+                ctx.lineTo(lastSeg.x, lastSeg.y);
+                
+                ctx.strokeStyle = `hsla(${this.hue}, 60%, 70%, 0.3)`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // 画花朵 (在最顶端节点)
+                let prevSeg = this.segments[this.numSegments - 2];
+                
+                ctx.save();
+                ctx.translate(lastSeg.x, lastSeg.y);
+                
+                // 计算花朵朝向的角度
+                let angle = Math.atan2(lastSeg.y - prevSeg.y, lastSeg.x - prevSeg.x);
+                ctx.rotate(angle + Math.PI / 2);
+
+                // 发光效果
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = `hsl(${this.hue}, 100%, 70%)`;
+
+                // 画极简高级花瓣
+                ctx.fillStyle = `hsla(${this.hue}, 80%, 85%, 0.9)`;
+                for (let j = 0; j < 4; j++) {
+                    ctx.rotate(Math.PI / 2);
+                    ctx.beginPath();
+                    ctx.ellipse(0, -this.flowerSize, this.flowerSize * 0.6, this.flowerSize * 1.5, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 花蕊
+                ctx.beginPath();
+                ctx.arc(0, 0, this.flowerSize * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        function initFlowers() {
+            flowers = [];
+            let spacing = width / 15; // 决定花朵的密度
+            for (let i = spacing/2; i < width; i += spacing) {
+                // 稍微加入一点随机偏移，打破死板的等距
+                let x = i + (Math.random() - 0.5) * spacing * 0.8;
+                flowers.push(new Flower(x));
+            }
+        }
+
+        // 动画主循环
+        let time = 0;
+        function animate() {
+            // 使用带有透明度的黑色清空画布，产生动态的运动拖影（增加高级感）
+            ctx.fillStyle = 'rgba(10, 11, 16, 0.3)';
+            ctx.fillRect(0, 0, width, height);
+
+            // 更新鼠标速度衰减
+            mouse.vx *= 0.8;
+            mouse.vy *= 0.8;
+
+            flowers.forEach(flower => {
+                flower.update(time);
+                flower.draw();
+            });
+
+            time += 16; // 时间推进
+            requestAnimationFrame(animate);
+        }
+
+        // --- 交互事件监听 (鼠标 + 触摸) ---
+        function updateMouse(x, y) {
+            mouse.vx = x - lastMouse.x;
+            mouse.vy = y - lastMouse.y;
+            mouse.x = x;
+            mouse.y = y;
+            lastMouse.x = x;
+            lastMouse.y = y;
+        }
+
+        // 电脑端鼠标事件
+        window.addEventListener('mousemove', (e) => {
+            updateMouse(e.clientX, e.clientY);
+        });
+        
+        // 当鼠标移出屏幕，把交互点移走，避免卡在边缘
+        window.addEventListener('mouseout', () => {
+            mouse.x = -1000;
+            mouse.y = -1000;
+            mouse.vx = 0;
+            mouse.vy = 0;
+        });
+
+        // 手机端触摸事件
+        window.addEventListener('touchmove', (e) => {
+            let touch = e.touches[0];
+            updateMouse(touch.clientX, touch.clientY);
+        }, { passive: false }); // passive: false 配合 css 的 touch-action 完美阻止页面滚动
+
+        window.addEventListener('touchstart', (e) => {
+            let touch = e.touches[0];
+            lastMouse.x = touch.clientX;
+            lastMouse.y = touch.clientY;
+            mouse.x = touch.clientX;
+            mouse.y = touch.clientY;
+        });
+
+        window.addEventListener('touchend', () => {
+            mouse.x = -1000;
+            mouse.y = -1000;
+        });
+
+        // 启动
+        resize();
+        animate();
+    </script>
+</body>
+</html>
